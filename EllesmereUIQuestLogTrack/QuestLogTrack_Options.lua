@@ -1,0 +1,1 @@
+-- Merged into EllesmereUIQuestLogTrack.lua (v1.1.1). Intentionally empty.

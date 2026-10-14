@@ -1,0 +1,11 @@
+## Interface: 120000, 120001, 120005, 120007, 120100, 120105, 16001
+## Title: EllesmereUI |cff0cd29fQuest Tracker BG Fix|r
+## Notes: Hides the EllesmereUI Quest Tracker background when it gets stuck on screen with no tracked content (after untracking the last quest or a zone change).
+## Category: |cff0cd29fEllesmere|rUI
+## Group: EllesmereUI
+## Author: Custom
+## Version: 1.0.0
+## Dependencies: EllesmereUI, EllesmereUIQuestTracker
+## IconTexture: Interface\AddOns\EllesmereUI\media\eg-logo.tga
+
+QTBackgroundFix.lua
