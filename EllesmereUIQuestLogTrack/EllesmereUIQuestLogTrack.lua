@@ -5,8 +5,7 @@
 --    small "Track" / "Untrack" button left of its collapse (-/+) button.
 --      - If every quest in that zone is tracked  -> "Untrack" (untracks them all)
 --      - Otherwise                               -> "Track"   (tracks them all)
---  * A toolbar under the quest log search box: Elite / Dungeon (left) and
---    Untrack All (right).
+--  * Elite / Dungeon / Untrack All buttons in the map window's title bar.
 --
 --  Taint notes: nothing is written onto Blizzard frames (all state lives in
 --  local tables), Blizzard functions are only post-hooked with
@@ -286,141 +285,66 @@ end
 local AnchorFilterButtons -- forward (Track by kind section)
 
 -------------------------------------------------------------------------------
---  Toolbar (1.4.0): a strip right under the quest log search box holding
---  Elite / Dungeon (left) and Untrack All (right). EllesmereUI 9.6 put its own
---  controls into the old spot next to the settings gear, so the buttons now
---  get a row of their own.
---
---  Room is made by pushing QuestScrollFrame's TOP anchor down by BAR_H. Other
---  addons (Leatrix Maps) re-anchor that frame too, so a SetPoint post-hook
---  treats any point it did not set itself as the new base and re-applies the
---  offset on top -- no fight over the position. Switched off -> offset 0.
+--  Title bar buttons (1.5.0): Elite, Dungeon and Untrack All sit in the map
+--  WINDOW's title bar, so they never cover the quest list or the quest
+--  details page (1.4.x put them on a bar above the list, which overlapped the
+--  details page's Back button).
+--   * Leatrix Maps "simple map frame": Leatrix moves the quest search box into
+--     its title bar -> the buttons go right before (left of) the search box.
+--   * Blizzard layout (search box still on the quest list): the buttons go
+--     left of the window's maximize (+) / close (x) buttons.
+--  Parented to QuestMapFrame, so they only show while the quest log is open.
 -------------------------------------------------------------------------------
-local BAR_H = 22
-local toolbar
-local shiftRec = setmetatable({}, { __mode = "k" })  -- [frame][point i] = { base = y, applied = y }
-local shifting = false
-
-local function PlainNum(v)
-    return type(v) == "number" and not (issecretvalue and issecretvalue(v))
-end
-
--- Offset the points of `frame` chosen by pick(point, relFrame, relPoint, y)
--- by dy from their base. A y we did not write ourselves is someone else's
--- anchor (Blizzard XML, Leatrix, EUI) and becomes the new base, so other
--- addons re-anchoring the frame never fight with us. dy = 0 restores.
-local function ShiftFrame(frame, dy, pick)
-    if not frame or shifting then return end
-    local pts = {}
-    for i = 1, (frame:GetNumPoints() or 0) do
-        local p, rel, rp, x, y = frame:GetPoint(i)
-        if not p or not PlainNum(x) or not PlainNum(y) then return end   -- unreadable: leave it alone
-        pts[i] = { p, rel, rp, x, y }
-    end
-    local recs = shiftRec[frame] or {}
-    shiftRec[frame] = recs
-    local changed = false
-    for i, t in ipairs(pts) do
-        if pick(t[1], t[2], t[3], t[5]) then
-            local rec = recs[i] or {}
-            recs[i] = rec
-            if rec.applied == nil or math.abs(t[5] - rec.applied) > 0.01 then rec.base = t[5] end
-            local newY = rec.base + dy
-            if math.abs(t[5] - newY) > 0.01 then t[5] = newY; changed = true end
-            rec.applied = newY
-        else
-            recs[i] = nil
-        end
-    end
-    if not changed then return end
-    shifting = true
-    frame:ClearAllPoints()
-    for _, t in ipairs(pts) do frame:SetPoint(t[1], t[2], t[3], t[4], t[5]) end
-    shifting = false
-end
-
--- The quest list: its TOP edge moves down by BAR_H.
-local function PickListTop(p) return p:find("^TOP") ~= nil end
-
--- Blizzard's header row (search box, settings gear, quest count) is made of
--- children of QuestScrollFrame anchored ABOVE its top edge, so it would move
--- down with the list. Those points are moved back up by the same amount, so
--- the row stays put and the bar opens up between it and the list. When
--- Leatrix Maps (or anything else) has re-anchored them elsewhere, the
--- relFrame check skips them.
-local function HeaderPicker(qs)
-    return function(p, rel, rp, y)
-        if rel ~= qs or not rp:find("^TOP") then return false end
-        return p:find("^BOTTOM") ~= nil or y >= 10
-    end
-end
-
-local function HeaderItems(qs)
-    local items, skip = {}, {}
-    if qs.ScrollBar then skip[qs.ScrollBar] = true end
-    if qs.GetScrollChild and qs:GetScrollChild() then skip[qs:GetScrollChild()] = true end
-    if qs.BorderFrame then skip[qs.BorderFrame] = true end
-    for _, c in ipairs({ qs:GetChildren() }) do
-        if not skip[c] then items[#items + 1] = c end
-    end
-    for _, r in ipairs({ qs:GetRegions() }) do
-        if r.GetObjectType and r:GetObjectType() == "FontString" then items[#items + 1] = r end
-    end
-    local count = _G.QuestLogCount
-    if count and count.GetPoint then items[#items + 1] = count end
-    return items
-end
+local toolbar   -- the holder frame in the title bar
 
 local function AnchorToolbar()
     local qs = _G.QuestScrollFrame
     if not (toolbar and qs) then return end
-    toolbar:ClearAllPoints()
-    toolbar:SetPoint("BOTTOMLEFT", qs, "TOPLEFT", 0, 0)
-    toolbar:SetPoint("BOTTOMRIGHT", qs, "TOPRIGHT", 0, 0)
-end
-
-local function Relayout()
-    local qs = _G.QuestScrollFrame
-    if not qs or shifting then return end
-    local want = (toolbar and toolbar:IsShown() and Enabled()) and BAR_H or 0
-    ShiftFrame(qs, -want, PickListTop)
-    local pick = HeaderPicker(qs)
-    for _, item in ipairs(HeaderItems(qs)) do
-        ShiftFrame(item, want, pick)
+    local sb = qs.SearchBox
+    local rel
+    if sb and sb:GetNumPoints() > 0 then rel = select(2, sb:GetPoint(1)) end
+    local anchor, lvlFrom
+    if sb and sb:IsShown() and rel ~= nil and rel ~= qs then
+        -- Search box moved into a title bar (Leatrix): sit right before it.
+        anchor, lvlFrom = sb, sb
+        toolbar:ClearAllPoints()
+        toolbar:SetPoint("RIGHT", sb, "LEFT", -10, 0)
+    else
+        local bf = _G.WorldMapFrame and _G.WorldMapFrame.BorderFrame
+        local mm = bf and bf.MaximizeMinimizeFrame
+        local close = bf and bf.CloseButton
+        anchor = (mm and mm:IsShown() and mm) or close
+        if not anchor then return end
+        lvlFrom = anchor
+        toolbar:ClearAllPoints()
+        toolbar:SetPoint("RIGHT", anchor, "LEFT", -6, 0)
     end
-    AnchorToolbar()
+    toolbar:SetFrameStrata(lvlFrom:GetFrameStrata() or "HIGH")
+    toolbar:SetFrameLevel((lvlFrom:GetFrameLevel() or 1) + 2)
 end
 
 local function CreateToolbar()
     if toolbar then return toolbar end
     local qs = _G.QuestScrollFrame
-    if not qs then return nil end
-    toolbar = CreateFrame("Frame", nil, qs:GetParent() or _G.QuestMapFrame)
-    toolbar:SetHeight(BAR_H)
-    toolbar:SetFrameLevel((qs:GetFrameLevel() or 1) + 10)
-    local plate = toolbar:CreateTexture(nil, "BACKGROUND")
-    plate:SetPoint("TOPLEFT", 0, -1)
-    plate:SetPoint("BOTTOMRIGHT", 0, 1)
-    plate:SetColorTexture(1, 1, 1, 0.04)
-    hooksecurefunc(qs, "SetPoint", function() if not shifting then Relayout() end end)
-    for _, key in ipairs({ "SearchBox", "SettingsDropdown" }) do
-        local f = qs[key]
-        if f then
-            hooksecurefunc(f, "SetPoint", function()
-                if not shifting then C_Timer.After(0, Relayout) end
-            end)
-        end
+    if not (qs and _G.QuestMapFrame) then return nil end
+    toolbar = CreateFrame("Frame", nil, _G.QuestMapFrame)
+    toolbar:SetSize(186, 20)   -- Elite 42 + Dungeon 58 + Untrack All 74 + gaps
+    if qs.SearchBox then
+        hooksecurefunc(qs.SearchBox, "SetPoint", function() C_Timer.After(0, AnchorToolbar) end)
     end
     -- Other addons lay the map out in their own OnShow handlers: settle after them.
-    _G.QuestMapFrame:HookScript("OnShow", function() Relayout(); C_Timer.After(0, Relayout) end)
-    Relayout()
+    _G.QuestMapFrame:HookScript("OnShow", function() AnchorToolbar(); C_Timer.After(0, AnchorToolbar) end)
+    if _G.WorldMapFrame then
+        _G.WorldMapFrame:HookScript("OnShow", function() C_Timer.After(0, AnchorToolbar) end)
+    end
+    AnchorToolbar()
     return toolbar
 end
 
 local function AnchorUntrackAll()
     if not (untrackAllBtn and toolbar) then return end
     untrackAllBtn:ClearAllPoints()
-    untrackAllBtn:SetPoint("RIGHT", toolbar, "RIGHT", -4, 0)
+    untrackAllBtn:SetPoint("RIGHT", toolbar, "RIGHT", 0, 0)
     if AnchorFilterButtons then AnchorFilterButtons() end
 end
 
@@ -605,7 +529,7 @@ function AnchorFilterButtons()
     local e, d = kindBtns.elite, kindBtns.dungeon
     if not (e and d and toolbar) then return end
     e:ClearAllPoints()
-    e:SetPoint("LEFT", toolbar, "LEFT", 4, 0)
+    e:SetPoint("LEFT", toolbar, "LEFT", 0, 0)
     d:ClearAllPoints()
     d:SetPoint("LEFT", e, "RIGHT", 4, 0)
 end
@@ -646,15 +570,12 @@ function RefreshAll()
     -- Switched off in the options: hide everything we own and stop here.
     if not Enabled() then
         for _, b in pairs(headerButtons) do b:Hide() end
-        if toolbar and toolbar:IsShown() then
-            toolbar:Hide()
-            Relayout()      -- give the list its space back
-        end
+        if toolbar then toolbar:Hide() end
         return
     end
     if toolbar and not toolbar:IsShown() then
         toolbar:Show()
-        Relayout()
+        AnchorToolbar()
     end
     local qm = _G.QuestMapFrame
     if not qm or not qm:IsVisible() then return end
